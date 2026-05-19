@@ -1,8 +1,14 @@
 log_dir: "Models/LJSpeech"
 save_freq: 5
 log_interval: 10
+
 device: "cuda"
-epochs: 50 # number of finetuning epoch (1 hour of data)
+
+# number of finetuning epochs (with about 1 hour of data)
+# note: epochs 0-9 only train the acoustic modules (decoder, style encoder, etc.)
+# diffusion training begins at diff_epoch (see loss_params below), so early samples will sound rough
+epochs: 50
+
 batch_size: 8
 max_len: 400 # maximum number of frames
 pretrained_model: "Models/LibriTTS/epochs_2nd_00020.pth"
@@ -14,6 +20,20 @@ ASR_config: "Utils/ASR/config.yml"
 ASR_path: "Utils/ASR/epoch_00080.pth"
 PLBERT_dir: 'Utils/PLBERT/'
 
+sampling:
+  # generate an inference sample every N epochs (0 = off)
+  sample_every_n_epoch: 1
+
+  # generate a sample before training starts (pretrained model baseline)
+  sample_at_first: true
+
+  # alpha: how much of the acoustic style (timbre) comes from the diffusion prediction vs the reference clip
+  #   0.0 = 100% reference clip  |  0.3 = LibriTTS notebook default  |  1.0 = 100% diffusion (best for tracking training progress)
+  sample_alpha: 1.0
+  # beta: how much of the prosodic style (rhythm, pitch contour) comes from the diffusion prediction vs the reference clip
+  #   0.0 = 100% reference clip  |  0.7 = LibriTTS notebook default  |  1.0 = 100% diffusion (best for tracking training progress)
+  sample_beta: 1.0
+  
 data_params:
   train_data: "Data/train_list.txt"
   val_data: "Data/val_list.txt"

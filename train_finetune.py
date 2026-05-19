@@ -12,6 +12,10 @@ import librosa
 import click
 import shutil
 import warnings
+import phonemizer
+import soundfile as sf
+from text_utils import TextCleaner
+from nltk.tokenize import word_tokenize
 warnings.simplefilter('ignore')
 from torch.utils.tensorboard import SummaryWriter
 
@@ -240,6 +244,105 @@ def main(config_path):
                                )
     
     
+    sampling_config = config.get('sampling', {})
+    sample_every_n_epoch = sampling_config.get('sample_every_n_epoch', 1)
+    sample_at_first = sampling_config.get('sample_at_first', False)
+    sample_alpha = sampling_config.get('sample_alpha', 1.0)
+    sample_beta = sampling_config.get('sample_beta', 1.0)
+
+    # ---- epoch-end sample inference setup ----
+    samples_dir = osp.join(log_dir, 'samples')
+    os.makedirs(samples_dir, exist_ok=True)
+
+    SAMPLE_TEXT = "StyleTTS two is a text to speech model that leverages style diffusion and adversarial training with large speech language models."
+    _sample_phonemizer = phonemizer.backend.EspeakBackend(
+        language='en-us', preserve_punctuation=True, with_stress=True)
+    _sample_text_cleaner = TextCleaner()
+    _sample_to_mel = torchaudio.transforms.MelSpectrogram(
+        n_mels=80, n_fft=2048, win_length=1200, hop_length=300)
+
+    # load reference audio waveform once; recompute embedding each epoch as weights update
+    _ref_audio_path = osp.join(root_path, train_list[0].split('|')[0])
+    _ref_wave, _ = librosa.load(_ref_audio_path, sr=sr)
+    _ref_wave, _ = librosa.effects.trim(_ref_wave, top_db=30)
+
+    def generate_epoch_sample(epoch):
+        _ = [model[key].eval() for key in model]
+        try:
+            ref_wave_t = torch.from_numpy(_ref_wave).float()
+            ref_mel = _sample_to_mel(ref_wave_t)
+            ref_mel = (torch.log(1e-5 + ref_mel.unsqueeze(0)) - (-4)) / 4
+            ref_mel = ref_mel.to(device)
+
+            with torch.no_grad():
+                ref_s = torch.cat([
+                    model.style_encoder(ref_mel.unsqueeze(1)),
+                    model.predictor_encoder(ref_mel.unsqueeze(1)),
+                ], dim=1)
+
+            ps = _sample_phonemizer.phonemize([SAMPLE_TEXT])
+            ps = word_tokenize(ps[0])
+            ps = ' '.join(ps)
+            tokens = _sample_text_cleaner(ps)
+            tokens.insert(0, 0)
+            tokens = torch.LongTensor(tokens).to(device).unsqueeze(0)
+
+            with torch.no_grad():
+                input_lengths = torch.LongTensor([tokens.shape[-1]]).to(device)
+                text_mask = length_to_mask(input_lengths).to(device)
+
+                t_en = model.text_encoder(tokens, input_lengths, text_mask)
+                bert_dur = model.bert(tokens, attention_mask=(~text_mask).int())
+                d_en = model.bert_encoder(bert_dur).transpose(-1, -2)
+
+                sampler_kwargs = dict(
+                    noise=torch.randn((1, 256)).unsqueeze(1).to(device),
+                    embedding=bert_dur,
+                    embedding_scale=1,
+                    num_steps=5,
+                )
+                if multispeaker:
+                    sampler_kwargs['features'] = ref_s
+                s_pred = sampler(**sampler_kwargs).squeeze(1)
+
+                s = s_pred[:, 128:]
+                ref = s_pred[:, :128]
+
+                if multispeaker:
+                    ref = sample_alpha * ref + (1 - sample_alpha) * ref_s[:, :128]
+                    s   = sample_beta  * s   + (1 - sample_beta)  * ref_s[:, 128:]
+
+                d = model.predictor.text_encoder(d_en, s, input_lengths, text_mask)
+                x, _ = model.predictor.lstm(d)
+                duration = model.predictor.duration_proj(x)
+                duration = torch.sigmoid(duration).sum(axis=-1)
+                pred_dur = torch.round(duration.squeeze()).clamp(min=1)
+                pred_dur[-1] += 5
+
+                pred_aln_trg = torch.zeros(input_lengths, int(pred_dur.sum().data))
+                c_frame = 0
+                for i in range(pred_aln_trg.size(0)):
+                    pred_aln_trg[i, c_frame:c_frame + int(pred_dur[i].data)] = 1
+                    c_frame += int(pred_dur[i].data)
+
+                en = d.transpose(-1, -2) @ pred_aln_trg.unsqueeze(0).to(device)
+                F0_pred, N_pred = model.predictor.F0Ntrain(en, s)
+                out = model.decoder(
+                    t_en @ pred_aln_trg.unsqueeze(0).to(device),
+                    F0_pred, N_pred, ref.squeeze().unsqueeze(0),
+                )
+
+            wav_out = out.squeeze().cpu().float().numpy()
+            save_path = osp.join(samples_dir, 'sample_epoch_%03d.wav' % epoch)
+            sf.write(save_path, wav_out, sr)
+            logger.info('Epoch sample saved: %s' % save_path)
+        except Exception as e:
+            logger.warning('Sample generation failed at epoch %d: %s' % (epoch + 1, e))
+    # ---- end sample inference setup ----
+
+    if sample_at_first:
+        generate_epoch_sample(start_epoch)
+
     for epoch in range(start_epoch, epochs):
         running_loss = 0
         start_time = time.time()
@@ -679,8 +782,10 @@ def main(config_path):
         writer.add_scalar('eval/mel_loss', loss_test / iters_test, epoch + 1)
         writer.add_scalar('eval/dur_loss', loss_test / iters_test, epoch + 1)
         writer.add_scalar('eval/F0_loss', loss_f / iters_test, epoch + 1)
-        
-        
+
+        if sample_every_n_epoch > 0 and (epoch + 1) % sample_every_n_epoch == 0:
+            generate_epoch_sample(epoch + 1)
+
         if (epoch + 1) % save_freq == 0 :
             if (loss_test / iters_test) < best_loss:
                 best_loss = loss_test / iters_test
