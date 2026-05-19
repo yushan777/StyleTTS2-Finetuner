@@ -1,3 +1,7 @@
+**Fork Notice:** This is a fork of [StyleTTS2](https://github.com/yl4579/StyleTTS2) with emphasis on modern dependencies (Blackwell support) and improvements to the fine-tuning experience.
+
+---
+
 # StyleTTS 2: Towards Human-Level Text-to-Speech through Style Diffusion and Adversarial Training with Large Speech Language Models
 
 ### Yinghao Aaron Li, Cong Han, Vinay S. Raghavan, Gavin Mischler, Nima Mesgarani
