@@ -1,1 +1,84 @@
-__pycache__
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pyc
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# Unit test / coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Secrets / env vars
+.env
+.env.*
+*.env
+
+# ML / training artifacts
+Models/LibriTTS/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+
+# Audio / data
+training_datasets/
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# Custom configs
+Configs/config_ft_*.yml
+Configs/config_ft-*.yml
+
+# Output files
+output/
+
+# Logs
+*.log
+logs/
+runs/
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
