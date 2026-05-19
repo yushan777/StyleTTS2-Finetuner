@@ -18,7 +18,6 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-import pandas as pd
 
 _pad = "$"
 _punctuation = ';:,.!?¡¿—…"«»“” '
@@ -84,8 +83,6 @@ class FilePathDataset(torch.utils.data.Dataset):
         self.text_cleaner = TextCleaner()
         self.sr = sr
 
-        self.df = pd.DataFrame(self.data_list)
-
         self.to_melspec = torchaudio.transforms.MelSpectrogram(**MEL_PARAMS)
 
         self.mean, self.std = -4, 4
@@ -116,7 +113,8 @@ class FilePathDataset(torch.utils.data.Dataset):
         acoustic_feature = acoustic_feature[:, :(length_feature - length_feature % 2)]
         
         # get reference sample
-        ref_data = (self.df[self.df[2] == str(speaker_id)]).sample(n=1).iloc[0].tolist()
+        matching = [r for r in self.data_list if r[2] == str(speaker_id)]
+        ref_data = random.choice(matching)
         ref_mel_tensor, ref_label = self._load_data(ref_data[:3])
         
         # get OOD text
